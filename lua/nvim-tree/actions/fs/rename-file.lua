@@ -15,7 +15,14 @@ function M.rename(node, to)
     utils.notify.warn(err_fmt(node.absolute_path, to, "file already exists"))
     return
   end
-
+  local result = false
+  if node.extension == "ts" or node.extension == "tsx" then
+    result = require("nvim-tree.actions.fs.lsp-rename-fille").ts_rename(node, to)
+    print(result)
+  end
+  if result then
+    return
+  end
   local success, err = uv.fs_rename(node.absolute_path, to)
   if not success then
     return utils.notify.warn(err_fmt(node.absolute_path, to, err))
