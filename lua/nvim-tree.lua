@@ -135,7 +135,8 @@ end
 
 local function find_existing_windows()
   return vim.tbl_filter(function(win)
-    return utils.is_nvim_tree_buf(api.nvim_win_get_buf(win))
+    local buf = api.nvim_win_get_buf(win)
+    return api.nvim_buf_get_name(buf):match "NvimTree" ~= nil
   end, api.nvim_list_wins())
 end
 
@@ -236,26 +237,29 @@ function M.on_enter(netrw_disabled)
   local buf_has_content = #lines > 1 or (#lines == 1 and lines[1] ~= "")
 
   local buf_is_dir = is_dir and netrw_disabled
+  local buf_is_empty = bufname == "" and not buf_has_content
   local should_be_preserved = vim.tbl_contains(ft_ignore, buftype)
 
   local should_open = false
   local should_focus_other_window = false
   local should_find = false
   if (_config.open_on_setup or _config.open_on_setup_file) and not should_be_preserved then
-    if not buf_has_content and _config.open_on_setup then
-      should_open = true
-      should_focus_other_window = _config.focus_empty_on_setup
-    elseif buf_is_dir and _config.open_on_setup then
+    if buf_is_dir or buf_is_empty then
       should_open = true
     elseif is_file and _config.open_on_setup_file then
       should_open = true
       should_focus_other_window = true
       should_find = _config.update_focused_file.enable
-    elseif _config.ignore_buffer_on_setup and _config.open_on_setup then
+    elseif _config.ignore_buffer_on_setup then
       should_open = true
       should_focus_other_window = true
     end
   end
+
+  local should_hijack = _config.hijack_directories.enable
+    and _config.hijack_directories.auto_open
+    and is_dir
+    and not should_be_preserved
 
   -- Session that left a NvimTree Buffer opened, reopen with it
   local existing_tree_wins = find_existing_windows()
@@ -263,7 +267,7 @@ function M.on_enter(netrw_disabled)
     api.nvim_set_current_win(existing_tree_wins[1])
   end
 
-  if should_open or existing_tree_wins[1] ~= nil then
+  if should_open or should_hijack or existing_tree_wins[1] ~= nil then
     lib.open(cwd)
 
     if should_focus_other_window then
@@ -339,7 +343,7 @@ local function setup_autocommands(opts)
   create_nvim_tree_autocmd("BufWipeout", {
     pattern = "NvimTree_*",
     callback = function()
-      if vim.bo.filetype == "NvimTree" then
+      if utils.is_nvim_tree_buf(0) then
         view._prevent_buffer_override()
       end
     end,
@@ -362,7 +366,14 @@ local function setup_autocommands(opts)
     create_nvim_tree_autocmd("TabEnter", { callback = vim.schedule_wrap(M.tab_change) })
   end
   if opts.hijack_cursor then
-    create_nvim_tree_autocmd("CursorMoved", { pattern = "NvimTree_*", callback = M.place_cursor_on_node })
+    create_nvim_tree_autocmd("CursorMoved", {
+      pattern = "NvimTree_*",
+      callback = function()
+        if utils.is_nvim_tree_buf(0) then
+          M.place_cursor_on_node()
+        end
+      end,
+    })
   end
   if opts.sync_root_with_cwd then
     create_nvim_tree_autocmd("DirChanged", {
@@ -384,7 +395,14 @@ local function setup_autocommands(opts)
   end
 
   if opts.reload_on_bufenter and not has_watchers then
-    create_nvim_tree_autocmd("BufEnter", { pattern = "NvimTree_*", callback = reloaders.reload_explorer })
+    create_nvim_tree_autocmd("BufEnter", {
+      pattern = "NvimTree_*",
+      callback = function()
+        if utils.is_nvim_tree_buf(0) then
+          reloaders.reload_explorer()
+        end
+      end,
+    })
   end
 
   if opts.view.centralize_selection then
@@ -418,7 +436,14 @@ local function setup_autocommands(opts)
   end
 
   if opts.view.float.enable and opts.view.float.quit_on_focus_loss then
-    create_nvim_tree_autocmd("WinLeave", { pattern = "NvimTree_*", callback = view.close })
+    create_nvim_tree_autocmd("WinLeave", {
+      pattern = "NvimTree_*",
+      callback = function()
+        if utils.is_nvim_tree_buf(0) then
+          view.close()
+        end
+      end,
+    })
   end
 end
 
@@ -433,7 +458,6 @@ local DEFAULT_OPTS = { -- BEGIN_DEFAULT_OPTS
   open_on_setup = false,
   open_on_setup_file = false,
   open_on_tab = false,
-  focus_empty_on_setup = false,
   ignore_buf_on_tab_change = {},
   sort_by = "name",
   root_dirs = {},
@@ -708,7 +732,6 @@ function M.setup(conf)
   _config.update_focused_file = opts.update_focused_file
   _config.open_on_setup = opts.open_on_setup
   _config.open_on_setup_file = opts.open_on_setup_file
-  _config.focus_empty_on_setup = opts.focus_empty_on_setup
   _config.ignore_buffer_on_setup = opts.ignore_buffer_on_setup
   _config.ignore_ft_on_setup = opts.ignore_ft_on_setup
   _config.ignore_buf_on_tab_change = opts.ignore_buf_on_tab_change
