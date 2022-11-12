@@ -1,8 +1,7 @@
-local uv = vim.loop
-
 local lib = require "nvim-tree.lib"
 local utils = require "nvim-tree.utils"
 local events = require "nvim-tree.events"
+local notify = require "nvim-tree.notify"
 
 local M = {}
 
@@ -12,22 +11,23 @@ end
 
 function M.rename(node, to)
   if utils.file_exists(to) then
-    utils.notify.warn(err_fmt(node.absolute_path, to, "file already exists"))
+    notify.warn(err_fmt(node.absolute_path, to, "file already exists"))
     return
   end
   local result = false
   if node.extension == "ts" or node.extension == "tsx" then
     result = require("nvim-tree.actions.fs.lsp-rename-fille").ts_rename(node, to)
-    print(result)
   end
   if result then
     return
   end
-  local success, err = uv.fs_rename(node.absolute_path, to)
+  local success, err = vim.loop.fs_rename(node.absolute_path, to)
+
+  local success, err = vim.loop.fs_rename(node.absolute_path, to)
   if not success then
-    return utils.notify.warn(err_fmt(node.absolute_path, to, err))
+    return notify.warn(err_fmt(node.absolute_path, to, err))
   end
-  utils.notify.info(node.absolute_path .. " ➜ " .. to)
+  notify.info(node.absolute_path .. " ➜ " .. to)
   utils.rename_loaded_buffers(node.absolute_path, to)
   events._dispatch_node_renamed(node.absolute_path, to)
 end

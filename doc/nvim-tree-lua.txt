@@ -69,6 +69,9 @@ Setup should be run in a lua file or in a |lua-heredoc| if using in a vim file.
     vim.g.loaded_netrw = 1
     vim.g.loaded_netrwPlugin = 1
 
+    -- set termguicolors to enable highlight groups
+    vim.opt.termguicolors = true
+
     -- empty setup using defaults
     require("nvim-tree").setup()
 
@@ -305,6 +308,7 @@ Subsequent calls to setup will replace the previous configuration.
       filesystem_watchers = {
         enable = true,
         debounce_delay = 50,
+        ignore_dirs = {},
       },
       git = {
         enable = true,
@@ -369,6 +373,9 @@ Subsequent calls to setup will replace the previous configuration.
           profile = false,
           watcher = false,
         },
+      },
+      notify = {
+        threshold = vim.log.levels.INFO,
       },
     } -- END_DEFAULT_OPTS
 <
@@ -597,6 +604,12 @@ performance.
     *nvim-tree.filesystem_watchers.debounce_delay*
     Idle milliseconds between filesystem change and action.
       Type: `number`, Default: `50` (ms)
+
+    *nvim-tree.filesystem_watchers.ignore_dirs*
+    List of vim regex for absolute directory paths that will not be watched.
+    Backslashes must be escaped e.g. `"my-project/\\.build$"`. See |string-match|.
+    Useful when path is not in `.gitignore` or git integration is disabled.
+      Type: {string}, Default: `{}`
 
 *nvim-tree.on_attach*
 Function ran when creating the nvim-tree buffer.
@@ -989,6 +1002,18 @@ The filter can be cleared with the `F` key by default.
     Whether to filter folders or not.
       Type: `boolean`, Default: `true`
 
+*nvim-tree.notify*
+Configuration for notification.
+
+    *nvim-tree.notify.threshold*
+    Specify minimum notification level, uses the values from |vim.log.levels|
+      Type: `enum`, Default: `vim.log.levels.INFO`
+
+    `ERROR`:   hard errors e.g. failure to read from the file system.
+    `WARNING`: non-fatal errors e.g. unable to system open a file.
+    `INFO:`    information only e.g. file copy path confirmation.
+    `DEBUG:`   not used.
+
 *nvim-tree.log*
 Configuration for diagnostic logging.
 
@@ -1091,7 +1116,7 @@ The api is separated in multiple modules, which can be accessed with
 `require("nvim-tree.api").moduleName.functionality`.
 
 Functions that needs a tree node parameter are exposed with an abstraction
-that injects the node from the cursor position in the tree when calling 
+that injects the node from the cursor position in the tree when calling
 the function. It will use the node you pass as an argument in priority if it
 exists.
 
@@ -1122,6 +1147,7 @@ exists.
     - rename_sub
     - cut
     - paste
+    - clear_clipboard
     - print_clipboard
     - copy.node
     - copy.absolute_path
@@ -1165,6 +1191,7 @@ exists.
     - get
     - list
     - toggle
+    - clear
     - bulk.move
     - navigate.next
     - navigate.prev
@@ -1173,27 +1200,46 @@ exists.
 ==============================================================================
  6. MAPPINGS                                              *nvim-tree-mappings*
 
-Setting your own mapping in the configuration will soon be deprecated, see |nvim-tree.on_attach| for experimental replacement.
+Setting your own mapping in the configuration will soon be deprecated, see
+|nvim-tree.on_attach| for experimental replacement.
 
-The `list` option in `view.mappings.list` is a table of
+`view.mappings.list` is a table of:
+  {key}       (string|table of string) mandatory |{lhs}|.
 
-- `key` can be either a string or a table of string (lhs)
-- `action` is the name of the action, set to `""` to remove default action
-- `action_cb` is the function that will be called, it receives the node as a parameter. Optional for default actions
-- `mode` is normal by default
+  {action}    (string) mandatory name of the action.
+              `""` to remove an action with {key}. The case of {key} must
+              exactly match the action you are removing e.g. `'<Tab>'` to
+              remove the default preview action.
+              An arbitrary description when using `action_cb`.
+
+  {action_cb} (function) optional custom function that will be called.
+              Receives the node as a parameter.
+              Non-empty description for `action` is required.
+
+  {mode}      (string) optional mode as per |nvim_set_keymap|.
+              Default `'n'`.
+
+Examples:
 >
-  local tree_cb = require'nvim-tree.config'.nvim_tree_callback
+    local function print_node_path(node)
+      print(node.absolute_path)
+    end
 
-  local function print_node_path(node) {
-    print(node.absolute_path)
-  }
+    ----
 
-  local list = {
-    { key = {"<CR>", "o" }, action = "edit", mode = "n"},
-    { key = "p", action = "print_path", action_cb = print_node_path },
-    { key = "s", cb = tree_cb("vsplit") }, --tree_cb and the cb property are deprecated
-    { key = "<2-RightMouse>", action = "" }, -- will remove default cd action
-  }
+    view = {
+      mappings = {
+        list = {
+          -- remove a default mapping for cd
+          { key = "<2-RightMouse>", action = "" },
+
+          -- add multiple normal mode mappings for edit
+          { key = { "<CR>", "o" }, action = "edit", mode = "n" },
+
+          -- custom action
+          { key = "p", action = "print_the_node_path", action_cb = print_node_path },
+
+          ----
 <
 Mouse support defined in |KeyBindings|
 
@@ -1318,6 +1364,9 @@ Example (in your `init.vim`):
 You should have 'termguicolors' enabled, otherwise, colors will not be
 applied.
 
+To view the active highlight groups run `:so $VIMRUNTIME/syntax/hitest.vim`
+as per |:highlight|
+
 Default linked group follows name.
 
 NvimTreeSymlink
@@ -1354,6 +1403,7 @@ NvimTreeNormal
 NvimTreeEndOfBuffer     (NonText)
 NvimTreeCursorLine      (CursorLine)
 NvimTreeCursorLineNr    (CursorLineNr)
+NvimTreeLineNr          (LineNr)
 NvimTreeVertSplit       (VertSplit)     [deprecated, use NvimTreeWinSeparator]
 NvimTreeWinSeparator    (VertSplit)
 NvimTreeCursorColumn    (CursorColumn)
@@ -1388,7 +1438,7 @@ nvim-tree will dispatch events whenever an action is made. These events can be
 subscribed to through handler functions. This allows for even further
 customization of nvim-tree.
 
-A handler for an event is just a function which receives one argument, the 
+A handler for an event is just a function which receives one argument, the
 payload of the event. The payload is different for each event type. Refer
 to |nvim_tree_registering_handlers| for more information.
 
@@ -1400,9 +1450,10 @@ Handlers are registered by calling the `events.subscribe` function available in 
 For example, registering a handler for when a node is renamed is done like this:
 >
     local api = require('nvim-tree.api')
+    local Event = api.events.Event
 
     api.events.subscribe(Event.NodeRenamed, function(data)
-        print("Node renamed from " .. data.old_name .. " to " ..  data.new_name)
+      print("Node renamed from " .. data.old_name .. " to " ..  data.new_name)
     end)
 <
 
@@ -1414,7 +1465,7 @@ You can access the event enum with:
 <
 Here is the list of available variant of this enum:
 
-- Event.Ready 
+- Event.Ready
                 When NvimTree has been initialized
                 • Note: Handler takes no parameter.
 
