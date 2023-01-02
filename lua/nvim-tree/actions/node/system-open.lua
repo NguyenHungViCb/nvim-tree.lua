@@ -1,10 +1,7 @@
-local M = {
-  config = {
-    is_windows = vim.fn.has "win32" == 1 or vim.fn.has "win32unix" == 1,
-    is_macos = vim.fn.has "mac" == 1 or vim.fn.has "macunix" == 1,
-    is_unix = vim.fn.has "unix" == 1,
-  },
-}
+local notify = require "nvim-tree.notify"
+local utils = require "nvim-tree.utils"
+
+local M = {}
 
 function M.fn(node)
   if #M.config.system_open.cmd == 0 then
@@ -27,14 +24,13 @@ function M.fn(node)
       process.stderr:close()
       process.handle:close()
       if code ~= 0 then
-        process.errors = process.errors .. string.format("NvimTree system_open: return code %d.", code)
-        error(process.errors)
+        notify.warn(string.format("system_open failed with return code %d: %s", code, process.errors))
       end
     end
   )
   table.remove(process.args)
   if not process.handle then
-    error("\n" .. process.pid .. "\nNvimTree system_open: failed to spawn process using '" .. process.cmd .. "'.")
+    notify.warn(string.format("system_open failed to spawn command '%s': %s", process.cmd, process.pid))
     return
   end
   vim.loop.read_start(process.stderr, function(err, data)
@@ -49,17 +45,18 @@ function M.fn(node)
 end
 
 function M.setup(opts)
+  M.config = {}
   M.config.system_open = opts.system_open or {}
 
   if #M.config.system_open.cmd == 0 then
-    if M.config.is_windows then
+    if utils.is_windows then
       M.config.system_open = {
         cmd = "cmd",
         args = { "/c", "start", '""' },
       }
-    elseif M.config.is_macos then
+    elseif utils.is_macos then
       M.config.system_open.cmd = "open"
-    elseif M.config.is_unix then
+    elseif utils.is_unix then
       M.config.system_open.cmd = "xdg-open"
     end
   end

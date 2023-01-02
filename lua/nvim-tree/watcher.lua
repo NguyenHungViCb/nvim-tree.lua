@@ -58,7 +58,7 @@ function Event:start()
     else
       log.line("watcher", "event_cb '%s' '%s'", self._path, filename)
       for _, listener in ipairs(self._listeners) do
-        listener()
+        listener(filename)
       end
     end
   end)
@@ -99,16 +99,19 @@ function Event:destroy(message)
   end
 
   Event._events[self._path] = nil
+
+  self.destroyed = true
 end
 
-function Watcher:new(path, callback, data)
-  log.line("watcher", "Watcher:new '%s'", path)
+function Watcher:new(path, files, callback, data)
+  log.line("watcher", "Watcher:new '%s' %s", path, vim.inspect(files))
 
   local w = setmetatable(data, Watcher)
 
   w._event = Event._events[path] or Event:new(path)
   w._listener = nil
   w._path = path
+  w._files = files
   w._callback = callback
 
   if not w._event then
@@ -123,8 +126,10 @@ function Watcher:new(path, callback, data)
 end
 
 function Watcher:start()
-  self._listener = function()
-    self._callback(self)
+  self._listener = function(filename)
+    if not self._files or vim.tbl_contains(self._files, filename) then
+      self._callback(self)
+    end
   end
 
   self._event:add(self._listener)
@@ -136,6 +141,8 @@ function Watcher:destroy()
   self._event:remove(self._listener)
 
   utils.array_remove(Watcher._watchers, self)
+
+  self.destroyed = true
 end
 
 M.Watcher = Watcher
